@@ -30,9 +30,10 @@ class PolicyAccounting(object):
             date_cursor = datetime.now().date()
 
         invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
-            .filter(Invoice.bill_date < date_cursor) \
+            .filter(Invoice.bill_date <= date_cursor) \
             .order_by(Invoice.bill_date) \
             .all()
+
         due_now = 0
         for invoice in invoices:
             due_now += invoice.amount_due
@@ -44,6 +45,19 @@ class PolicyAccounting(object):
             due_now -= payment.amount_paid
 
         return due_now
+
+    def make_policy(self, policy_number, effective_date, annual_premium):
+        """Create a new policy method.
+        """
+
+        policy = Policy(policy_number,
+                        effective_date,
+                        annual_premium)
+        db.session.add(policy)
+        db.session.commit()
+
+        return policy
+
 
     def make_payment(self, contact_id=None, date_cursor=None, amount=0):
         if not date_cursor:
