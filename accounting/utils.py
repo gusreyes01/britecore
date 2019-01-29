@@ -47,7 +47,8 @@ class PolicyAccounting(object):
         return due_now
 
     def make_policy(self, policy_number, effective_date, annual_premium):
-        """Create a new policy method.
+        """
+        Create a new policy method.
         """
 
         policy = Policy(policy_number,
@@ -58,8 +59,11 @@ class PolicyAccounting(object):
 
         return policy
 
-
     def make_payment(self, contact_id=None, date_cursor=None, amount=0):
+        """
+        Create a new payment method.
+        """
+
         if not date_cursor:
             date_cursor = datetime.now().date()
 
@@ -100,18 +104,23 @@ class PolicyAccounting(object):
             if not self.return_account_balance(invoice.cancel_date):
                 continue
             else:
-                print
-                "THIS POLICY SHOULD HAVE CANCELED"
+                print "THIS POLICY SHOULD HAVE CANCELED"
                 break
         else:
-            print
-            "THIS POLICY SHOULD NOT CANCEL"
+            print "THIS POLICY SHOULD NOT CANCEL"
 
     def make_invoices(self):
+        """
+        Create new invoices method,
+        this function will be called when initializing
+        a new PolicyAccounting instance.
+
+        """
+
         for invoice in self.policy.invoices:
             invoice.delete()
 
-        billing_schedules = {'Annual': None, 'Semi-Annual': 3, 'Quarterly': 4, 'Monthly': 12}
+        billing_schedules = {'Annual': None, 'Two-Pay': 2, 'Semi-Annual': 3, 'Quarterly': 4, 'Monthly': 12}
 
         invoices = []
         first_invoice = Invoice(self.policy.id,
@@ -157,8 +166,7 @@ class PolicyAccounting(object):
                                   self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
                 invoices.append(invoice)
         else:
-            print
-            "You have chosen a bad billing schedule."
+            print "You have chosen a bad billing schedule."
 
         for invoice in invoices:
             db.session.add(invoice)
@@ -173,8 +181,7 @@ def build_or_refresh_db():
     db.drop_all()
     db.create_all()
     insert_data()
-    print
-    "DB Ready!"
+    print "DB Ready!"
 
 
 def insert_data():
@@ -214,6 +221,12 @@ def insert_data():
     p3.named_insured = ryan_bucket.id
     p3.agent = john_doe_agent.id
     policies.append(p3)
+
+    p4 = Policy('Policy Four', date(2015, 2, 1), 500)
+    p4.billing_schedule = 'Two-Pay'
+    p4.named_insured = ryan_bucket.id
+    p4.agent = john_doe_agent.id
+    policies.append(p4)
 
     for policy in policies:
         db.session.add(policy)
