@@ -1,10 +1,11 @@
 #!/user/bin/env python2.7
 
 from datetime import date, datetime
+
 from dateutil.relativedelta import relativedelta
+from models import Contact, Invoice, Payment, Policy
 
 from accounting import db
-from models import Contact, Invoice, Payment, Policy
 
 """
 #######################################################
@@ -12,10 +13,12 @@ This is the base code for the engineer project.
 #######################################################
 """
 
+
 class PolicyAccounting(object):
     """
      Each policy has its own instance of accounting.
     """
+
     def __init__(self, policy_id):
         self.policy = Policy.query.filter_by(id=policy_id).one()
 
@@ -26,17 +29,17 @@ class PolicyAccounting(object):
         if not date_cursor:
             date_cursor = datetime.now().date()
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id)\
-                                .filter(Invoice.bill_date < date_cursor)\
-                                .order_by(Invoice.bill_date)\
-                                .all()
+        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
+            .filter(Invoice.bill_date < date_cursor) \
+            .order_by(Invoice.bill_date) \
+            .all()
         due_now = 0
         for invoice in invoices:
             due_now += invoice.amount_due
 
-        payments = Payment.query.filter_by(policy_id=self.policy.id)\
-                                .filter(Payment.transaction_date < date_cursor)\
-                                .all()
+        payments = Payment.query.filter_by(policy_id=self.policy.id) \
+            .filter(Payment.transaction_date < date_cursor) \
+            .all()
         for payment in payments:
             due_now -= payment.amount_paid
 
@@ -74,20 +77,21 @@ class PolicyAccounting(object):
         if not date_cursor:
             date_cursor = datetime.now().date()
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id)\
-                                .filter(Invoice.cancel_date <= date_cursor)\
-                                .order_by(Invoice.bill_date)\
-                                .all()
+        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
+            .filter(Invoice.cancel_date <= date_cursor) \
+            .order_by(Invoice.bill_date) \
+            .all()
 
         for invoice in invoices:
             if not self.return_account_balance(invoice.cancel_date):
                 continue
             else:
-                print "THIS POLICY SHOULD HAVE CANCELED"
+                print
+                "THIS POLICY SHOULD HAVE CANCELED"
                 break
         else:
-            print "THIS POLICY SHOULD NOT CANCEL"
-
+            print
+            "THIS POLICY SHOULD NOT CANCEL"
 
     def make_invoices(self):
         for invoice in self.policy.invoices:
@@ -97,9 +101,9 @@ class PolicyAccounting(object):
 
         invoices = []
         first_invoice = Invoice(self.policy.id,
-                                self.policy.effective_date, #bill_date
-                                self.policy.effective_date + relativedelta(months=1), #due
-                                self.policy.effective_date + relativedelta(months=1, days=14), #cancel
+                                self.policy.effective_date,  # bill_date
+                                self.policy.effective_date + relativedelta(months=1),  # due
+                                self.policy.effective_date + relativedelta(months=1, days=14),  # cancel
                                 self.policy.annual_premium)
         invoices.append(first_invoice)
 
@@ -108,7 +112,7 @@ class PolicyAccounting(object):
         elif self.policy.billing_schedule == "Two-Pay":
             first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
             for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i*6
+                months_after_eff_date = i * 6
                 bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
                 invoice = Invoice(self.policy.id,
                                   bill_date,
@@ -119,7 +123,7 @@ class PolicyAccounting(object):
         elif self.policy.billing_schedule == "Quarterly":
             first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
             for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i*3
+                months_after_eff_date = i * 3
                 bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
                 invoice = Invoice(self.policy.id,
                                   bill_date,
@@ -128,13 +132,24 @@ class PolicyAccounting(object):
                                   self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
                 invoices.append(invoice)
         elif self.policy.billing_schedule == "Monthly":
-            pass
+            first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
+            for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
+                months_after_eff_date = i * 12
+                bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
+                invoice = Invoice(self.policy.id,
+                                  bill_date,
+                                  bill_date + relativedelta(months=1),
+                                  bill_date + relativedelta(months=1, days=14),
+                                  self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
+                invoices.append(invoice)
         else:
-            print "You have chosen a bad billing schedule."
+            print
+            "You have chosen a bad billing schedule."
 
         for invoice in invoices:
             db.session.add(invoice)
         db.session.commit()
+
 
 ################################
 # The functions below are for the db and 
@@ -144,10 +159,12 @@ def build_or_refresh_db():
     db.drop_all()
     db.create_all()
     insert_data()
-    print "DB Ready!"
+    print
+    "DB Ready!"
+
 
 def insert_data():
-    #Contacts
+    # Contacts
     contacts = []
     john_doe_agent = Contact('John Doe', 'Agent')
     contacts.append(john_doe_agent)
@@ -194,4 +211,3 @@ def insert_data():
     payment_for_p2 = Payment(p2.id, anna_white.id, 400, date(2015, 2, 1))
     db.session.add(payment_for_p2)
     db.session.commit()
-
