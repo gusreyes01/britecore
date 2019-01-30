@@ -92,6 +92,12 @@ class PolicyAccounting(object):
         pass
 
     def evaluate_cancel(self, date_cursor=None):
+        """
+         This function lets the user know an invoice
+         on a policy has passed the cancel date without
+         being paid in full & the policy should be cancelled.
+        """
+
         if not date_cursor:
             date_cursor = datetime.now().date()
 
@@ -207,6 +213,7 @@ def insert_data():
     policies = []
     p1 = Policy('Policy One', date(2015, 1, 1), 365)
     p1.billing_schedule = 'Annual'
+    p1.named_insured = john_doe_insured.id
     p1.agent = bob_smith.id
     policies.append(p1)
 
