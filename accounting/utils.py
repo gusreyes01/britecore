@@ -67,11 +67,20 @@ class PolicyAccounting(object):
         if not date_cursor:
             date_cursor = datetime.now().date()
 
-        if not contact_id:
-            try:
-                contact_id = self.policy.named_insured
-            except:
-                pass
+
+        if self.evaluate_cancellation_pending_due_to_non_pay(date_cursor):
+            contact = Contact.query.get(contact_id)
+            if contact.role != 'Agent':
+                print 'You need to be an agent to pay this policy.'
+                return False
+
+        else:
+            if not contact_id:
+                try:
+                    contact_id = self.policy.named_insured
+                except:
+                    pass
+
 
         payment = Payment(self.policy.id,
                           contact_id,
