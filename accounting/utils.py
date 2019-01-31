@@ -26,6 +26,11 @@ class PolicyAccounting(object):
             self.make_invoices()
 
     def return_account_balance(self, date_cursor=None):
+        """
+         Returns the policy account balance by
+         adding all the invoices amounts
+         and substracting the amount paid.
+        """
         if not date_cursor:
             date_cursor = datetime.now().date()
 
@@ -46,7 +51,6 @@ class PolicyAccounting(object):
 
         return due_now
 
-
     def change_policy_billing_schedule(self, new_schedule):
         """
          Allows a ongoing policy to change it's billing schedule.
@@ -54,7 +58,8 @@ class PolicyAccounting(object):
         """
 
         if self.policy.billing_schedule == new_schedule:
-            print 'Current and new billing schedules are the same. Please choose a different schedule.'
+            print
+            'Current and new billing schedules are the same. Please choose a different schedule.'
             return None
 
         invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
@@ -71,8 +76,8 @@ class PolicyAccounting(object):
             db.session.commit()
 
         else:
-            print 'This policy is inactive or its balance is 0 so its billing schedule cannot be modified.'
-
+            print
+            'This policy is inactive or its balance is 0 so its billing schedule cannot be modified.'
 
     def make_policy(self, policy_number, effective_date, annual_premium):
         """
@@ -89,17 +94,20 @@ class PolicyAccounting(object):
 
     def make_payment(self, contact_id=None, date_cursor=None, amount=0):
         """
-        Create a new payment method.
+        Create a new payment method,
+        this method will evaluate each policy
+        if it's cancellation pending only agents
+        will be able to make payments.
         """
 
         if not date_cursor:
             date_cursor = datetime.now().date()
 
-
         if self.evaluate_cancellation_pending_due_to_non_pay(date_cursor):
             contact = Contact.query.get(contact_id)
             if contact.role != 'Agent':
-                print 'You need to be an agent to pay this policy.'
+                print
+                'You need to be an agent to pay this policy.'
                 return False
 
         else:
@@ -108,7 +116,6 @@ class PolicyAccounting(object):
                     contact_id = self.policy.named_insured
                 except:
                     pass
-
 
         payment = Payment(self.policy.id,
                           contact_id,
@@ -165,10 +172,12 @@ class PolicyAccounting(object):
                 self.policy.cancel_date = date_cursor
                 self.policy.cancel_description = cancel_description or 'Canceled due to non-payment.'
                 db.session.commit()
-                print "THIS POLICY HAS BEING CANCELED"
+                print
+                "THIS POLICY HAS BEING CANCELED"
                 break
         else:
-            print "THIS POLICY SHOULD NOT CANCEL"
+            print
+            "THIS POLICY SHOULD NOT CANCEL"
 
     def make_invoices(self, billing_schedule_change=False):
         """
@@ -228,7 +237,8 @@ class PolicyAccounting(object):
                                   self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
                 invoices.append(invoice)
         else:
-            print "You have chosen a bad billing schedule."
+            print
+            "You have chosen a bad billing schedule."
 
         for invoice in invoices:
             db.session.add(invoice)
@@ -243,7 +253,8 @@ def build_or_refresh_db():
     db.drop_all()
     db.create_all()
     insert_data()
-    print "DB Ready!"
+    print
+    "DB Ready!"
 
 
 def insert_data():
