@@ -127,3 +127,9 @@ class TestReturnAccountBalance(unittest.TestCase):
         invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
             .order_by(Invoice.bill_date).all()
         self.assertEquals(pa.return_account_balance(date_cursor=invoices[11].bill_date), 1200)
+
+    def test_policy_evaluate_cancel(self):
+        pa = PolicyAccounting(self.policy.id)
+        pa.evaluate_cancel(cancel_description='Some random reason')
+        self.assertEquals(pa.policy.status, 'Canceled')
+        self.assertEquals(pa.policy.cancel_description, 'Some random reason')

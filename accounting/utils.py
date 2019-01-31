@@ -142,7 +142,7 @@ class PolicyAccounting(object):
 
         return False
 
-    def evaluate_cancel(self, date_cursor=None):
+    def evaluate_cancel(self, date_cursor=None, cancel_description=None):
         """
          This function lets the user know an invoice
          on a policy has passed the cancel date without
@@ -161,7 +161,11 @@ class PolicyAccounting(object):
             if not self.return_account_balance(invoice.cancel_date):
                 continue
             else:
-                print "THIS POLICY SHOULD HAVE CANCELED"
+                self.policy.status = 'Canceled'
+                self.policy.cancel_date = date_cursor
+                self.policy.cancel_description = cancel_description or 'Canceled due to non-payment.'
+                db.session.commit()
+                print "THIS POLICY HAS BEING CANCELED"
                 break
         else:
             print "THIS POLICY SHOULD NOT CANCEL"
