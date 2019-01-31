@@ -111,7 +111,8 @@ class TestReturnAccountBalance(unittest.TestCase):
         pa = PolicyAccounting(self.policy.id)
         invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
             .order_by(Invoice.bill_date).all()
-        self.payments.append(pa.make_payment(contact_id=self.policy.named_insured,
+        # Must be an agent to make this payment
+        self.payments.append(pa.make_payment(contact_id=self.policy.agent,
                                              date_cursor=invoices[1].bill_date, amount=600))
         self.assertEquals(pa.return_account_balance(date_cursor=invoices[1].bill_date), 0)
 

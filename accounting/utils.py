@@ -29,7 +29,7 @@ class PolicyAccounting(object):
         if not date_cursor:
             date_cursor = datetime.now().date()
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
+        invoices = Invoice.query.filter_by(policy_id=self.policy.id, deleted=False) \
             .filter(Invoice.bill_date <= date_cursor) \
             .order_by(Invoice.bill_date) \
             .all()
@@ -45,6 +45,34 @@ class PolicyAccounting(object):
             due_now -= payment.amount_paid
 
         return due_now
+
+
+    def change_policy_billing_schedule(self, new_schedule):
+        """
+         Allows a ongoing policy to change it's billing schedule.
+         This method will set all existing invoices as deleted and create new ones.
+        """
+
+        if self.policy.billing_schedule == new_schedule:
+            print 'Current and new billing schedules are the same. Please choose a different schedule.'
+            return None
+
+        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
+            .order_by(Invoice.bill_date) \
+            .all()
+
+        if self.return_account_balance() > 0 and self.policy.status == 'Active':
+            for invoice in invoices:
+                invoice.deleted = True
+            self.policy.billing_schedule = new_schedule
+            print(self.return_account_balance())
+            self.policy.annual_premium = self.return_account_balance()
+            self.make_invoices(True)
+            db.session.commit()
+
+        else:
+            print 'This policy is inactive or its balance is 0 so its billing schedule cannot be modified.'
+
 
     def make_policy(self, policy_number, effective_date, annual_premium):
         """
@@ -138,7 +166,7 @@ class PolicyAccounting(object):
         else:
             print "THIS POLICY SHOULD NOT CANCEL"
 
-    def make_invoices(self):
+    def make_invoices(self, billing_schedule_change=False):
         """
         Create new invoices method,
         this function will be called when initializing
@@ -147,7 +175,8 @@ class PolicyAccounting(object):
         """
 
         for invoice in self.policy.invoices:
-            invoice.delete()
+            if not billing_schedule_change:
+                invoice.delete()
 
         billing_schedules = {'Annual': None, 'Two-Pay': 2, 'Quarterly': 4, 'Monthly': 12}
 
@@ -186,7 +215,7 @@ class PolicyAccounting(object):
         elif self.policy.billing_schedule == "Monthly":
             first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
             for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i * 12
+                months_after_eff_date = i * 1
                 bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
                 invoice = Invoice(self.policy.id,
                                   bill_date,
