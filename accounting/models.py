@@ -31,6 +31,18 @@ class Policy(db.Model):
 
     invoices = db.relation('Invoice', primaryjoin="Invoice.policy_id==Policy.id")
 
+    @property
+    def invoices_dict(self):
+        invoices = Invoice.query.filter_by(policy_id=self.id) \
+            .order_by(Invoice.bill_date) \
+            .all()
+
+        invoices_dict = [
+            dict(amount_due=invoice.amount_due, bill_date=str(invoice.bill_date), due_date=str(invoice.due_date)) for
+            invoice in invoices]
+        print(invoices_dict)
+        return invoices_dict
+
 
 class Contact(db.Model):
     __tablename__ = 'contacts'

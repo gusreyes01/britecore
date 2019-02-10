@@ -1,15 +1,113 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Some sort of title?</title>
-  <meta name="description" content="What is this?">
-  <meta name="author" content="Who?">
-  <!--[if lt IE 9]>
-<script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
-<![endif]-->
+    <meta charset="utf-8">
+    <title>Policy Accounting System</title>
+    <meta name="description" content="An Accounting system built on Flask">
+    <meta name="author" content="Codebrite">
+
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-GJzZqFGwb1QTTN6wy59ffF1BuGJpLSa9DkKMp0DgiMDm4iYMj70gZWKYbI706tWS" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css"
+          integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+
+
+    <!--[if lt IE 9]>
+    <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <style>
+        .policies-table {
+            margin-top: 10px;
+        }
+
+        .search-policy-btn {
+            margin-top: 30px;
+        }
+
+        .account-balance {
+            float: right;
+            color: red;
+        }
+
+    </style>
+
+
 </head>
 <body>
-    <p>Your server is working.</p>
+<div class="jumbotron">
+
+    <h2><i class="fas fa-search"></i>
+
+        Search Policy</h2>
+    <form data-bind="submit: searchPolicy">
+        <div class="row">
+            <div class="col-md-4">
+                <label>Policy number:</label> <input class="form-control" data-bind="value: newPolicyNumber"
+                                                     placeholder="What's the Policy Number?"/>
+            </div>
+            <div class="col-md-4">
+                <label>Date:</label> <input class="form-control" type="date"
+                                            data-bind="value: newPolicyDate"
+                                            placeholder="What's the Policy date?"/>
+            </div>
+            <div class="col-md-4">
+                <button class="button btn btn-primary search-policy-btn" type="submit">Search Policy</button>
+            </div>
+        </div>
+    </form>
+    <div class="row">
+
+        <table class="table policies-table" data-bind="visible: policies().length > 0">
+            <thead>
+            <th>
+                Policy No.
+            </th>
+            <th>
+                Effective date
+            </th>
+            </thead>
+            <tbody data-bind="foreach: policies">
+            <tr>
+                <td data-bind="text: policy_number"></td>
+                <td data-bind="text: effective_date"></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <div data-bind="visible: invoices().length > 0">
+        <h5> Policy invoices</h5>
+        <table class="table invoices-table">
+            <th>
+                Due date
+            </th>
+            <th>
+                Bill date
+            </th>
+            <th>
+                Amount due
+            </th>
+            <tbody data-bind="foreach: invoices">
+            <tr>
+                <td data-bind="text: due_date"></td>
+                <td data-bind="text: bill_date"></td>
+                <td data-bind="text: amount_due"></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="row account-balance" data-bind="visible: accounting_policies().length > 0">
+        <div data-bind="foreach: accounting_policies">
+            <h3 data-bind="text: account_balance"></h3>
+        </div>
+    </div>
+
+
+</div>
+
+
 </body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/knockout/3.4.2/knockout-min.js"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 </html>
