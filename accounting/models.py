@@ -1,58 +1,67 @@
 from accounting import db
 
 
-# from sqlalchemy.ext.declarative import declarative_base
-# 
-# DeclarativeBase = declarative_base()
-
 class Policy(db.Model):
-    __tablename__ = 'policies'
+    __tablename__ = "policies"
 
-    __table_args__ = {}
+    id = db.Column(db.Integer, primary_key=True)
+    policy_number = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    effective_date = db.Column(db.Date, nullable=False)
+    status = db.Column(
+        db.Enum("Active", "Canceled", "Expired", name="policy_status"),
+        default="Active",
+        nullable=False,
+    )
+    billing_schedule = db.Column(
+        db.Enum("Annual", "Two-Pay", "Quarterly", "Monthly", name="billing_schedule"),
+        default="Annual",
+        nullable=False,
+    )
+    annual_premium = db.Column(db.Integer, nullable=False)
+    named_insured = db.Column(db.Integer, db.ForeignKey("contacts.id"), nullable=False)
+    agent = db.Column(db.Integer, db.ForeignKey("contacts.id"), nullable=False)
+    cancel_description = db.Column(db.String(128))
+    cancel_date = db.Column(db.Date)
 
-    # column definitions
-    id = db.Column(u'id', db.INTEGER(), primary_key=True, nullable=False)
-    policy_number = db.Column(u'policy_number', db.VARCHAR(length=128), nullable=False)
-    effective_date = db.Column(u'effective_date', db.DATE(), nullable=False)
-    status = db.Column(u'status', db.Enum(u'Active', u'Canceled', u'Expired'), default=u'Active', nullable=False)
-    billing_schedule = db.Column(u'billing_schedule', db.Enum(u'Annual', u'Two-Pay', u'Quarterly', u'Monthly'),
-                                 default=u'Annual', nullable=False)
-    annual_premium = db.Column(u'annual_premium', db.INTEGER(), nullable=False)
-    named_insured = db.Column(u'named_insured', db.INTEGER(), db.ForeignKey('contacts.id'))
-    agent = db.Column(u'agent', db.INTEGER(), db.ForeignKey('contacts.id'))
-
-    cancel_description = db.Column(u'cancel_description', db.VARCHAR(length=128), nullable=True)
-    cancel_date = db.Column(u'cancel_date', db.DATE(), nullable=True)
+    invoices = db.relationship(
+        "Invoice",
+        back_populates="policy",
+        cascade="all, delete-orphan",
+        order_by="Invoice.bill_date",
+    )
+    payments = db.relationship(
+        "Payment",
+        back_populates="policy",
+        cascade="all, delete-orphan",
+    )
 
     def __init__(self, policy_number, effective_date, annual_premium):
         self.policy_number = policy_number
         self.effective_date = effective_date
         self.annual_premium = annual_premium
 
-    invoices = db.relation('Invoice', primaryjoin="Invoice.policy_id==Policy.id")
-
     @property
     def invoices_dict(self):
-        invoices = Invoice.query.filter_by(policy_id=self.id) \
-            .order_by(Invoice.bill_date) \
-            .all()
-
-        invoices_dict = [
-            dict(amount_due=invoice.amount_due, bill_date=str(invoice.bill_date), due_date=str(invoice.due_date)) for
-            invoice in invoices]
-        print(invoices_dict)
-        return invoices_dict
+        return [
+            {
+                "amount_due": invoice.amount_due,
+                "bill_date": invoice.bill_date.isoformat(),
+                "due_date": invoice.due_date.isoformat(),
+            }
+            for invoice in self.invoices
+            if not invoice.deleted
+        ]
 
 
 class Contact(db.Model):
-    __tablename__ = 'contacts'
+    __tablename__ = "contacts"
 
-    __table_args__ = {}
-
-    # column definitions
-    id = db.Column(u'id', db.INTEGER(), primary_key=True, nullable=False)
-    name = db.Column(u'name', db.VARCHAR(length=128), nullable=False)
-    role = db.Column(u'role', db.Enum(u'Named Insured', u'Agent'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    role = db.Column(
+        db.Enum("Named Insured", "Agent", name="contact_role"),
+        nullable=False,
+    )
 
     def __init__(self, name, role):
         self.name = name
@@ -60,18 +69,17 @@ class Contact(db.Model):
 
 
 class Invoice(db.Model):
-    __tablename__ = 'invoices'
+    __tablename__ = "invoices"
 
-    __table_args__ = {}
+    id = db.Column(db.Integer, primary_key=True)
+    policy_id = db.Column(db.Integer, db.ForeignKey("policies.id"), nullable=False, index=True)
+    bill_date = db.Column(db.Date, nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    cancel_date = db.Column(db.Date, nullable=False)
+    amount_due = db.Column(db.Integer, nullable=False)
+    deleted = db.Column(db.Boolean, default=False, server_default="0", nullable=False)
 
-    # column definitions
-    id = db.Column(u'id', db.INTEGER(), primary_key=True, nullable=False)
-    policy_id = db.Column(u'policy_id', db.INTEGER(), db.ForeignKey('policies.id'), nullable=False)
-    bill_date = db.Column(u'bill_date', db.DATE(), nullable=False)
-    due_date = db.Column(u'due_date', db.DATE(), nullable=False)
-    cancel_date = db.Column(u'cancel_date', db.DATE(), nullable=False)
-    amount_due = db.Column(u'amount_due', db.INTEGER(), nullable=False)
-    deleted = db.Column(u'deleted', db.Boolean, default=False, server_default='0', nullable=False)
+    policy = db.relationship("Policy", back_populates="invoices")
 
     def __init__(self, policy_id, bill_date, due_date, cancel_date, amount_due):
         self.policy_id = policy_id
@@ -82,16 +90,15 @@ class Invoice(db.Model):
 
 
 class Payment(db.Model):
-    __tablename__ = 'payments'
+    __tablename__ = "payments"
 
-    __table_args__ = {}
+    id = db.Column(db.Integer, primary_key=True)
+    policy_id = db.Column(db.Integer, db.ForeignKey("policies.id"), nullable=False, index=True)
+    contact_id = db.Column(db.Integer, db.ForeignKey("contacts.id"), nullable=False)
+    amount_paid = db.Column(db.Integer, nullable=False)
+    transaction_date = db.Column(db.Date, nullable=False)
 
-    # column definitions
-    id = db.Column(u'id', db.INTEGER(), primary_key=True, nullable=False)
-    policy_id = db.Column(u'policy_id', db.INTEGER(), db.ForeignKey('policies.id'), nullable=False)
-    contact_id = db.Column(u'contact_id', db.INTEGER(), db.ForeignKey('contacts.id'), nullable=False)
-    amount_paid = db.Column(u'amount_paid', db.INTEGER(), nullable=False)
-    transaction_date = db.Column(u'transaction_date', db.DATE(), nullable=False)
+    policy = db.relationship("Policy", back_populates="payments")
 
     def __init__(self, policy_id, contact_id, amount_paid, transaction_date):
         self.policy_id = policy_id

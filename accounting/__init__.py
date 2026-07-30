@@ -1,15 +1,35 @@
-#You will need to pip install flask and the sqlalchemy extension for flask.
+from pathlib import Path
+
 from flask import Flask
-from flask.ext.sqlalchemy import SQLAlchemy
-import os
+from flask_sqlalchemy import SQLAlchemy
 
-# Initialize the application.
-app = Flask(__name__,
-            static_url_path='/static')
-app._static_folder = os.path.abspath("static/")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-app.config.from_pyfile('config.py')
+app = Flask(
+    __name__,
+    static_folder=str(PROJECT_ROOT / "static"),
+    static_url_path="/static",
+)
+app.config.from_pyfile("config.py")
 db = SQLAlchemy(app)
 
-# Import the views file for routing.
-import views
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://stackpath.bootstrapcdn.com "
+        "https://use.fontawesome.com; "
+        "font-src 'self' https://use.fontawesome.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    return response
+
+
+from accounting import views  # noqa: E402, F401

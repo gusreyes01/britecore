@@ -1,314 +1,221 @@
-#!/user/bin/env python2.7
-
-from datetime import date, datetime
+import logging
+from datetime import date
 
 from dateutil.relativedelta import relativedelta
-from models import Contact, Invoice, Payment, Policy
 
 from accounting import db
+from accounting.models import Contact, Invoice, Payment, Policy
 
-"""
-#######################################################
-This is the base code for the engineer project.
-#######################################################
-"""
+BILLING_SCHEDULES = {
+    "Annual": (1, 12),
+    "Two-Pay": (2, 6),
+    "Quarterly": (4, 3),
+    "Monthly": (12, 1),
+}
+audit_logger = logging.getLogger("accounting.audit")
 
 
-class PolicyAccounting(object):
-    """
-     Each policy has its own instance of accounting.
-    """
+def _installment_amounts(total, count):
+    if total <= 0:
+        raise ValueError("premium must be positive")
+    base, remainder = divmod(total, count)
+    return [base + (1 if index < remainder else 0) for index in range(count)]
+
+
+class PolicyAccounting:
+    """Accounting operations for a single insurance policy."""
 
     def __init__(self, policy_id):
-        self.policy = Policy.query.filter_by(id=policy_id).one()
+        self.policy = db.session.get(Policy, policy_id)
+        if self.policy is None:
+            raise LookupError(f"policy {policy_id} was not found")
 
+    def ensure_invoices(self):
+        """Create an initial invoice schedule explicitly when one does not exist."""
         if not self.policy.invoices:
             self.make_invoices()
+        return self.policy.invoices
 
     def return_account_balance(self, date_cursor=None):
-        """
-         Returns the policy account balance by
-         adding all the invoices amounts
-         and substracting the amount paid.
-        """
-        if not date_cursor:
-            date_cursor = datetime.now().date()
+        cursor = date_cursor or date.today()
+        invoiced = sum(
+            invoice.amount_due
+            for invoice in self.policy.invoices
+            if not invoice.deleted and invoice.bill_date <= cursor
+        )
+        paid = sum(
+            payment.amount_paid
+            for payment in self.policy.payments
+            if payment.transaction_date <= cursor
+        )
+        return invoiced - paid
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id, deleted=False) \
-            .filter(Invoice.bill_date <= date_cursor) \
-            .order_by(Invoice.bill_date) \
-            .all()
-
-        due_now = 0
-        for invoice in invoices:
-            due_now += invoice.amount_due
-
-        payments = Payment.query.filter_by(policy_id=self.policy.id) \
-            .filter(Payment.transaction_date <= date_cursor) \
-            .all()
-        for payment in payments:
-            due_now -= payment.amount_paid
-
-        return due_now
-
-    def change_policy_billing_schedule(self, new_schedule):
-        """
-         Allows a ongoing policy to change it's billing schedule.
-         This method will set all existing invoices as deleted and create new ones.
-        """
-
+    def change_policy_billing_schedule(self, new_schedule, effective_date=None):
+        if new_schedule not in BILLING_SCHEDULES:
+            raise ValueError("unsupported billing schedule")
+        if self.policy.status != "Active":
+            raise ValueError("only active policies can change schedule")
         if self.policy.billing_schedule == new_schedule:
-            print
-            'Current and new billing schedules are the same. Please choose a different schedule.'
-            return None
+            raise ValueError("new billing schedule must be different")
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
-            .order_by(Invoice.bill_date) \
-            .all()
+        cursor = effective_date or date.today()
+        future_invoices = [
+            invoice
+            for invoice in self.policy.invoices
+            if invoice.bill_date >= cursor and not invoice.deleted
+        ]
+        remaining_premium = sum(invoice.amount_due for invoice in future_invoices)
+        if remaining_premium <= 0:
+            raise ValueError("policy has no future premium to reschedule")
 
-        if self.return_account_balance() > 0 and self.policy.status == 'Active':
-            for invoice in invoices:
+        for invoice in future_invoices:
                 invoice.deleted = True
-            self.policy.billing_schedule = new_schedule
-            print(self.return_account_balance())
-            self.policy.annual_premium = self.return_account_balance()
-            self.make_invoices(True)
-            db.session.commit()
 
-        else:
-            print
-            'This policy is inactive or its balance is 0 so its billing schedule cannot be modified.'
-
-    def make_policy(self, policy_number, effective_date, annual_premium):
-        """
-        Create a new policy method.
-        """
-
-        policy = Policy(policy_number,
-                        effective_date,
-                        annual_premium)
-        db.session.add(policy)
+        self.policy.billing_schedule = new_schedule
+        self.make_invoices(
+            replace=False,
+            start_date=cursor,
+            premium=remaining_premium,
+        )
         db.session.commit()
-
-        return policy
+        audit_logger.info(
+            "billing_schedule_changed policy_id=%s schedule=%s effective_date=%s",
+            self.policy.id,
+            new_schedule,
+            cursor.isoformat(),
+        )
 
     def make_payment(self, contact_id=None, date_cursor=None, amount=0):
-        """
-        Create a new payment method,
-        this method will evaluate each policy
-        if it's cancellation pending only agents
-        will be able to make payments.
-        """
+        cursor = date_cursor or date.today()
+        if amount <= 0:
+            raise ValueError("payment amount must be positive")
 
-        if not date_cursor:
-            date_cursor = datetime.now().date()
+        payer_id = contact_id or self.policy.named_insured
+        contact = db.session.get(Contact, payer_id)
+        if contact is None or payer_id not in {self.policy.named_insured, self.policy.agent}:
+            raise ValueError("payer must be the named insured or policy agent")
+        if self.evaluate_cancellation_pending_due_to_non_pay(cursor) and contact.role != "Agent":
+            raise PermissionError("only the policy agent may pay during cancellation pending")
 
-        if self.evaluate_cancellation_pending_due_to_non_pay(date_cursor):
-            contact = Contact.query.get(contact_id)
-            if contact.role != 'Agent':
-                print
-                'You need to be an agent to pay this policy.'
-                return False
-
-        else:
-            if not contact_id:
-                try:
-                    contact_id = self.policy.named_insured
-                except:
-                    pass
-
-        payment = Payment(self.policy.id,
-                          contact_id,
-                          amount,
-                          date_cursor)
+        payment = Payment(self.policy.id, payer_id, amount, cursor)
         db.session.add(payment)
         db.session.commit()
-
+        audit_logger.info(
+            "payment_created policy_id=%s contact_id=%s amount=%s date=%s",
+            self.policy.id,
+            payer_id,
+            amount,
+            cursor.isoformat(),
+        )
         return payment
 
     def evaluate_cancellation_pending_due_to_non_pay(self, date_cursor=None):
-        """
-         If this function returns true, an invoice
-         on a policy has passed the due date without
-         being paid in full. However, it has not necessarily
-         made it to the cancel_date yet.
-        """
-        if not date_cursor:
-            date_cursor = datetime.now().date()
-
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
-            .filter(Invoice.cancel_date <= date_cursor) \
-            .order_by(Invoice.bill_date) \
-            .all()
-
-        for invoice in invoices:
-            if not self.return_account_balance(invoice.due_date):
-                continue
-            else:
-                return True
-
-        return False
+        cursor = date_cursor or date.today()
+        return any(
+            invoice.due_date < cursor <= invoice.cancel_date
+            and self.return_account_balance(invoice.due_date) > 0
+            for invoice in self.policy.invoices
+            if not invoice.deleted
+        )
 
     def evaluate_cancel(self, date_cursor=None, cancel_description=None):
-        """
-         This function lets the user know an invoice
-         on a policy has passed the cancel date without
-         being paid in full & the policy should be cancelled.
-        """
+        cursor = date_cursor or date.today()
+        should_cancel = any(
+            invoice.cancel_date <= cursor
+            and self.return_account_balance(invoice.cancel_date) > 0
+            for invoice in self.policy.invoices
+            if not invoice.deleted
+        )
+        if not should_cancel:
+            return False
 
-        if not date_cursor:
-            date_cursor = datetime.now().date()
+        self.policy.status = "Canceled"
+        self.policy.cancel_date = cursor
+        self.policy.cancel_description = (
+            cancel_description or "Canceled due to non-payment."
+        )[:128]
+        db.session.commit()
+        audit_logger.info(
+            "policy_cancelled policy_id=%s date=%s reason=%s",
+            self.policy.id,
+            cursor.isoformat(),
+            self.policy.cancel_description,
+        )
+        return True
 
-        invoices = Invoice.query.filter_by(policy_id=self.policy.id) \
-            .filter(Invoice.cancel_date <= date_cursor) \
-            .order_by(Invoice.bill_date) \
-            .all()
+    def make_invoices(self, replace=True, start_date=None, premium=None):
+        try:
+            count, month_step = BILLING_SCHEDULES[self.policy.billing_schedule]
+        except KeyError as exc:
+            raise ValueError("unsupported billing schedule") from exc
 
-        for invoice in invoices:
-            if not self.return_account_balance(invoice.cancel_date):
-                continue
-            else:
-                self.policy.status = 'Canceled'
-                self.policy.cancel_date = date_cursor
-                self.policy.cancel_description = cancel_description or 'Canceled due to non-payment.'
-                db.session.commit()
-                print
-                "THIS POLICY HAS BEING CANCELED"
-                break
-        else:
-            print
-            "THIS POLICY SHOULD NOT CANCEL"
+        if replace:
+            for invoice in list(self.policy.invoices):
+                db.session.delete(invoice)
+            db.session.flush()
 
-    def make_invoices(self, billing_schedule_change=False):
-        """
-        Create new invoices method,
-        this function will be called when initializing
-        a new PolicyAccounting instance.
-
-        """
-
-        for invoice in self.policy.invoices:
-            if not billing_schedule_change:
-                invoice.delete()
-
-        billing_schedules = {'Annual': None, 'Two-Pay': 2, 'Quarterly': 4, 'Monthly': 12}
-
-        invoices = []
-        first_invoice = Invoice(self.policy.id,
-                                self.policy.effective_date,  # bill_date
-                                self.policy.effective_date + relativedelta(months=1),  # due
-                                self.policy.effective_date + relativedelta(months=1, days=14),  # cancel
-                                self.policy.annual_premium)
-        invoices.append(first_invoice)
-
-        if self.policy.billing_schedule == "Annual":
-            pass
-        elif self.policy.billing_schedule == "Two-Pay":
-            first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
-            for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i * 6
-                bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
-                invoice = Invoice(self.policy.id,
-                                  bill_date,
-                                  bill_date + relativedelta(months=1),
-                                  bill_date + relativedelta(months=1, days=14),
-                                  self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
-                invoices.append(invoice)
-        elif self.policy.billing_schedule == "Quarterly":
-            first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
-            for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i * 3
-                bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
-                invoice = Invoice(self.policy.id,
-                                  bill_date,
-                                  bill_date + relativedelta(months=1),
-                                  bill_date + relativedelta(months=1, days=14),
-                                  self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
-                invoices.append(invoice)
-        elif self.policy.billing_schedule == "Monthly":
-            first_invoice.amount_due = first_invoice.amount_due / billing_schedules.get(self.policy.billing_schedule)
-            for i in range(1, billing_schedules.get(self.policy.billing_schedule)):
-                months_after_eff_date = i * 1
-                bill_date = self.policy.effective_date + relativedelta(months=months_after_eff_date)
-                invoice = Invoice(self.policy.id,
-                                  bill_date,
-                                  bill_date + relativedelta(months=1),
-                                  bill_date + relativedelta(months=1, days=14),
-                                  self.policy.annual_premium / billing_schedules.get(self.policy.billing_schedule))
-                invoices.append(invoice)
-        else:
-            print
-            "You have chosen a bad billing schedule."
-
-        for invoice in invoices:
-            db.session.add(invoice)
+        effective = start_date or self.policy.effective_date
+        amounts = _installment_amounts(
+            premium if premium is not None else self.policy.annual_premium,
+            count,
+        )
+        for index, amount in enumerate(amounts):
+            bill_date = effective + relativedelta(months=index * month_step)
+            db.session.add(
+                Invoice(
+                    self.policy.id,
+                    bill_date,
+                    bill_date + relativedelta(months=1),
+                    bill_date + relativedelta(months=1, days=14),
+                    amount,
+                )
+            )
         db.session.commit()
 
 
-################################
-# The functions below are for the db and 
-# shouldn't need to be edited.
-################################
 def build_or_refresh_db():
+    db.session.remove()
     db.drop_all()
     db.create_all()
     insert_data()
-    print
-    "DB Ready!"
 
 
 def insert_data():
-    # Contacts
-    contacts = []
-    john_doe_agent = Contact('John Doe', 'Agent')
-    contacts.append(john_doe_agent)
-    john_doe_insured = Contact('John Doe', 'Named Insured')
-    contacts.append(john_doe_insured)
-    bob_smith = Contact('Bob Smith', 'Agent')
-    contacts.append(bob_smith)
-    anna_white = Contact('Anna White', 'Named Insured')
-    contacts.append(anna_white)
-    joe_lee = Contact('Joe Lee', 'Agent')
-    contacts.append(joe_lee)
-    ryan_bucket = Contact('Ryan Bucket', 'Named Insured')
-    contacts.append(ryan_bucket)
+    contacts = [
+        Contact("John Doe", "Agent"),
+        Contact("John Doe", "Named Insured"),
+        Contact("Bob Smith", "Agent"),
+        Contact("Anna White", "Named Insured"),
+        Contact("Joe Lee", "Agent"),
+        Contact("Ryan Bucket", "Named Insured"),
+    ]
+    db.session.add_all(contacts)
+    db.session.flush()
 
-    for contact in contacts:
-        db.session.add(contact)
-    db.session.commit()
-
-    policies = []
-    p1 = Policy('Policy One', date(2015, 1, 1), 365)
-    p1.billing_schedule = 'Annual'
-    p1.named_insured = john_doe_insured.id
-    p1.agent = bob_smith.id
-    policies.append(p1)
-
-    p2 = Policy('Policy Two', date(2015, 2, 1), 1600)
-    p2.billing_schedule = 'Quarterly'
-    p2.named_insured = anna_white.id
-    p2.agent = joe_lee.id
-    policies.append(p2)
-
-    p3 = Policy('Policy Three', date(2015, 1, 1), 1200)
-    p3.billing_schedule = 'Monthly'
-    p3.named_insured = ryan_bucket.id
-    p3.agent = john_doe_agent.id
-    policies.append(p3)
-
-    p4 = Policy('Policy Four', date(2015, 2, 1), 500)
-    p4.billing_schedule = 'Two-Pay'
-    p4.named_insured = ryan_bucket.id
-    p4.agent = john_doe_agent.id
-    policies.append(p4)
-
-    for policy in policies:
-        db.session.add(policy)
+    policies = [
+        _seed_policy("Policy One", date(2015, 1, 1), 365, "Annual", contacts[1], contacts[2]),
+        _seed_policy(
+            "Policy Two", date(2015, 2, 1), 1600, "Quarterly", contacts[3], contacts[4]
+        ),
+        _seed_policy(
+            "Policy Three", date(2015, 1, 1), 1200, "Monthly", contacts[5], contacts[0]
+        ),
+        _seed_policy(
+            "Policy Four", date(2015, 2, 1), 500, "Two-Pay", contacts[5], contacts[0]
+        ),
+    ]
+    db.session.add_all(policies)
     db.session.commit()
 
     for policy in policies:
-        PolicyAccounting(policy.id)
-
-    payment_for_p2 = Payment(p2.id, anna_white.id, 400, date(2015, 2, 1))
-    db.session.add(payment_for_p2)
+        PolicyAccounting(policy.id).ensure_invoices()
+    db.session.add(Payment(policies[1].id, contacts[3].id, 400, date(2015, 2, 1)))
     db.session.commit()
+
+
+def _seed_policy(number, effective, premium, schedule, insured, agent):
+    policy = Policy(number, effective, premium)
+    policy.billing_schedule = schedule
+    policy.named_insured = insured.id
+    policy.agent = agent.id
+    return policy

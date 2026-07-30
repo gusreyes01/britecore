@@ -1,56 +1,67 @@
-# You will probably need more methods from flask but this one is a good start.
+from datetime import date
 
-import json
-import locale
-locale.setlocale( locale.LC_ALL, '' )
+from flask import jsonify, render_template, request
+from sqlalchemy.exc import MultipleResultsFound
 
-from flask import render_template, jsonify, request
-# Import our models
-from models import Policy
-
-# Import things from Flask that we need.
 from accounting import app
-# Routing for the server.
+from accounting.models import Policy
 from accounting.utils import PolicyAccounting
 
 
-@app.route("/")
+@app.get("/")
 def index():
-    # You will need to serve something up here.
-    return render_template('index.html')
+    return render_template("index.html")
 
 
-@app.route('/policies', methods=['GET', 'POST'])
+@app.post("/policies")
 def policies():
-    invoices_dict = []
-    policies_dict = []
-    policy = None
-    date = None
-    account_balance = 0
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _error("A JSON request body is required.", 400)
 
-    if request.data:
-        data = json.loads(request.data)
-        if ('date' in data):
-            date = data['date']
+    policy_number = payload.get("policy_number")
+    if not isinstance(policy_number, str) or not policy_number.strip():
+        return _error("Policy number is required.", 400)
+    if len(policy_number) > 128:
+        return _error("Policy number is too long.", 400)
 
-        print(data)
-        if ('policy_number' in data):
-            if data['policy_number']:
-                try:
-                    policy = Policy.query.filter_by(policy_number=data['policy_number']).one()
-                    # Find Policy Accouning object & return account balance based on the provided date.
-                    pa = PolicyAccounting(policy.id)
-                    account_balance = pa.return_account_balance(date)
-                except:
-                    return jsonify(status=404, message=['Policy not found. \n Please try a different policy number.'])
+    try:
+        cursor = _parse_date(payload.get("date"))
+    except ValueError:
+        return _error("Date must use YYYY-MM-DD format.", 400)
 
-    if policy:
-        policies_dict = [dict(policy_number=policy.policy_number, effective_date=str(policy.effective_date))]
-        invoices_dict = policy.invoices_dict
+    try:
+        policy = Policy.query.filter_by(policy_number=policy_number.strip()).one_or_none()
+    except MultipleResultsFound:
+        app.logger.exception("duplicate policy number")
+        return _error("Policy data is inconsistent.", 500)
+    if policy is None:
+        return _error("Policy not found.", 404)
 
-        return jsonify(status=200, message=['Policy found'], policies=policies_dict, invoices=invoices_dict,
-                       account_balances=[{'account_balance': 'Account balance: {}'.format(
-                           locale.currency(account_balance, grouping=True))}])
-    else:
-        return jsonify(status=404, message=['Policy not found. \n Please try a different policy number.'])
+    accounting = PolicyAccounting(policy.id)
+    accounting.ensure_invoices()
+    account_balance = accounting.return_account_balance(cursor)
+    return jsonify(
+        status=200,
+        message=["Policy found"],
+        policies=[
+            {
+                "policy_number": policy.policy_number,
+                "effective_date": policy.effective_date.isoformat(),
+            }
+        ],
+        invoices=policy.invoices_dict,
+        account_balances=[{"account_balance": f"Account balance: ${account_balance:,.2f}"}],
+    )
 
+
+def _parse_date(value):
+    if value in (None, ""):
+        return date.today()
+    if not isinstance(value, str):
+        raise ValueError
+    return date.fromisoformat(value)
+
+
+def _error(message, status):
+    return jsonify(status=status, message=[message]), status

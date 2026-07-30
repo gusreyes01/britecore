@@ -43,13 +43,15 @@
     <form data-bind="submit: searchPolicy">
         <div class="row">
             <div class="col-md-4">
-                <label>Policy number:</label> <input class="form-control" data-bind="value: newPolicyNumber"
-                                                     placeholder="What's the Policy Number?"/>
+                <label for="policy-number">Policy number:</label>
+                <input id="policy-number" name="policy_number" class="form-control"
+                       data-bind="value: newPolicyNumber" required maxlength="128"
+                       placeholder="What's the Policy Number?"/>
             </div>
             <div class="col-md-4">
-                <label>Date:</label> <input class="form-control" type="date"
-                                            data-bind="value: newPolicyDate"
-                                            placeholder="What's the Policy date?"/>
+                <label for="policy-date">Date:</label>
+                <input id="policy-date" name="date" class="form-control" type="date"
+                       data-bind="value: newPolicyDate"/>
             </div>
             <div class="col-md-4">
                 <button class="button btn btn-primary search-policy-btn" type="submit">Search Policy</button>
@@ -102,12 +104,9 @@
         </div>
     </div>
 
-
 </div>
-
-
-</body>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/knockout/3.4.2/knockout-min.js"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
 </html>
